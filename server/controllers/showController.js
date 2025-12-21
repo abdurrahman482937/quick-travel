@@ -80,12 +80,31 @@ export const addShow = async (req, res) => {
 // API to get all shows from the database
 export const getShows = async (req, res) => {
   try {
-    const shows = await Show.find({ showDateTime: { $gte: new Date() } })
+    // ১. আপাতত তারিখের ফিল্টার সরিয়ে চেক করুন ডাটা আসে কিনা
+    // পরে { showDateTime: { $gte: new Date() } } আবার যোগ করতে পারেন
+    const shows = await Show.find({}) 
       .populate("movie")
       .sort({ showDateTime: 1 });
-    // filter unique shows
-    const uniqueShows = new Set(shows.map((show) => show.movie));
-    res.json({ success: true, shows: Array.from(uniqueShows) });
+
+    if (!shows || shows.length === 0) {
+        return res.json({ success: true, shows: [], message: "No shows found" });
+    }
+
+    // ২. মুভি অবজেক্ট থেকে ডুপ্লিকেট রিমুভ করার সঠিক নিয়ম
+    const movieMap = {};
+    
+    shows.forEach((show) => {
+      // চেক করি মুভি ঠিকমতো populate হয়েছে কিনা
+      if (show.movie && show.movie._id) {
+        // মুভি আইডি দিয়ে ম্যাপে সেভ করি (এতে অটোমেটিক ডুপ্লিকেট রিমুভ হবে)
+        movieMap[show.movie._id] = show.movie;
+      }
+    });
+
+    // ম্যাপ থেকে শুধু মুভিগুলো অ্যারে আকারে নিয়ে আসি
+    const uniqueMovies = Object.values(movieMap);
+
+    res.json({ success: true, shows: uniqueMovies });
   } catch (error) {
     console.error(error);
     res.json({ success: false, message: error.message });
