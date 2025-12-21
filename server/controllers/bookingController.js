@@ -1,73 +1,41 @@
-import Show from "../models/Show.js";
-import Booking from "../models/Booking.js";
+import express from "express";
+import cors from "cors";
+import "dotenv/config";
+import connectDB from "./configs/db.js";
+import { clerkMiddleware } from "@clerk/express";
+import { serve } from "inngest/express";
+import { inngest, functions } from "./inngest/index.js";
+import showRouter from "./routes/showRoutes.js";
+import bookingRouter from "./routes/bookingRoutes.js";
+import adminRouter from "./routes/adminRoutes.js";
+import userRouter from "./routes/userRoutes.js";
+import { stripeWebhooks } from "./controllers/stripeWebhooks.js";
 
-// Function to check availability of selected seats for a movie
-const checkSeatsAvailability = async (showId, selectedSeats) => {
-  try {
-    const showData = await Show.findById(showId);
-    if (!showData) return false;
-    const occupiedSeats = showData.occupiedSeats;
-    const isAnySeatTaken = selectedSeats.some((seat) => occupiedSeats[seat]);
-    return !isAnySeatTaken;
-  } catch (error) {
-    console.log(error.message);
-    return false;
-  }
-};
+const app = express();
+const PORT = process.env.PORT || 3000;
 
-export const createBooking = async (req, res) => {
-  try {
-    const { userId } = req.auth();
-    const { showId, selectedSeats } = req.body;
-    const { origin } = req.headers;
+await connectDB();
 
-    // Check if the seat is available for the selected show
-    const isAvailable = await checkSeatsAvailability(showId, selectedSeats);
+// Stripe Webhook Route
+app.use(
+  "/api/stripe",
+  express.raw({ type: "application/json" }),
+  stripeWebhooks
+);
 
-    if (!isAvailable) {
-      return res.json({
-        success: false,
-        message: "Selected Seats are not available.",
-      });
-    }
+// Middleware
+app.use(cors());
+app.use(express.json());
+app.use(clerkMiddleware());
 
-    // Get the show details
-    const showData = await Show.findById(showId).populate("movie");
+// API Routes
+app.get("/", (req, res) => res.send("Hello, World!"));
+app.use("/api/inngest", serve({ client: inngest, functions }));
+app.use("/api/show", showRouter);
+app.use("/api/booking", bookingRouter);
+app.use("/api/admin", adminRouter);
+app.use("/api/user", userRouter);
 
-    // Create a new booking
-    const booking = await Booking.create({
-      user: userId,
-      show: showId,
-      amount: showData.showPrice * selectedSeats.length,
-      bookedSeats: selectedSeats,
-    });
-
-    selectedSeats.map((seat) => {
-      showData.occupiedSeats[seat] = userId;
-    });
-
-    showData.markModified("occupiedSeats");
-
-    await showData.save();
-
-    // Stripe Gateway Initialize
-    res.json({ success: true, message: "Booked successfully" });
-  } catch (error) {
-    console.log(error.message);
-    res.json({ success: false, message: error.message }).status(500);
-  }
-};
-
-export const getOccupiedSeats = async (req, res) => {
-  try {
-    const { showId } = req.params;
-    const showData = await Show.findById(showId);
-
-    const occupiedSeats = Object.keys(showData.occupiedSeats);
-
-    res.json({ success: true, occupiedSeats });
-  } catch (error) {
-    console.log(error.message);
-    res.json({ success: false, message: error.message });
-  }
-};
+app.listen(PORT, () => {
+  console.log(`Server is running on http://localhost:${PORT}`);
+});
